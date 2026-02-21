@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 
 // Heartbeat genérico por portão 
 const heartbeatInterval = 5000; // 5 segundos
-const DOOR_TTL_MS = 2 * heartbeatInterval;
+const DOOR_TTL_MS = 4 * heartbeatInterval;
 const doors = new Map();
 const watchers = new Map();
 
@@ -187,6 +187,7 @@ io.on("connection", (socket) => {
     };
 
     markBeat(doorId);
+    socket.emit("heartbeat_ack", { door: doorId });
   });
 
   socket.on("last_openings", async (payload = {}) => {
