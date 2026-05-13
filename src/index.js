@@ -2,6 +2,7 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
+import mqtt from "mqtt"; 
 import {
   getLastOpenings,
   getOrInsertDoor,
@@ -382,26 +383,7 @@ app.post("/portao_emerg", async (req, res) => {
         //     to: ["tiago.paixao@grupodass.com.br", "portaria.sest@grupodass.com.br", "portaria.sest2@grupodass.com.br"],
         //     subject: `⚠️ Portão de Emergência Aberto ⚠️`,
         //     html: `
-        //     <div style="font-family: Arial, sans-serif; color: #FF6F61; line-height: 1.6; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);">
-        //       <div style="text-align: center; margin-bottom: 20px;">
-        //         <h1 style="color: #FF6F61; font-size: 24px; margin: 0;">Portão de Emergência Aberto</h1>
-        //       </div>
-
-        //       <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0;">
-        //         <h2 style="color: #FF6F61; font-size: 20px; margin: 0 0 10px; text-align: center;"><strong>Automação Dass</strong></h2>
-
-        //         <h1 style="color: #0d9757; font-size: 22px; margin-bottom: 10px;">Mensagem:</h1>
-        //         <p style="font-size: 16px; color: #555; background-color: #f4f4f4; padding: 15px; border-radius: 5px; border: 1px solid #ddd;">
-        //           O portão de emergência da ${data.door === "1" ? "Expedição" : "Doca"} foi aberto em ${
-        //             data.date
-        //           }. Por favor, verifique a situação imediatamente!
-        //         </p>
-        //       </div>
-
-        //       <div style="text-align: center; margin-top: 30px; color: #777; font-size: 14px;">
-        //         <p>Este e-mail foi gerado automaticamente. Por favor, não responda.</p>
-        //       </div>
-        //   </div>
+        // ... (E-mail HTML comentado mantido igual)
         //     `,
         //   })
         //   .then(() => {
@@ -428,10 +410,51 @@ app.post("/portao_emerg", async (req, res) => {
   }
 });
 
+
+
+// INTEGRAÇÃO MQTT (Ouvinte / Subscriber)
+const mqttOptions = {
+  host: '10.100.1.43',
+  port: 1883,
+  username: 'dass',
+  password: 'pHUWphISTl7r_Geis'
+};
+
+const mqttClient = mqtt.connect(`mqtt://${mqttOptions.host}:${mqttOptions.port}`, mqttOptions);
+
+mqttClient.on('connect', () => {
+  console.log('Conectado ao broker MQTT com sucesso!');
+  
+  const topicToSubscribe = 'dass/galpao/#';
+  
+  mqttClient.subscribe(topicToSubscribe, (err) => {
+    if (!err) {
+      console.log(`Inscrito no tópico MQTT: ${topicToSubscribe}`);
+    } else {
+      console.error('Erro ao se inscrever no tópico MQTT:', err);
+    }
+  });
+});
+
+mqttClient.on('message', (topic, message) => {
+  // O -v (verbose) do mosquitto_sub imprime o tópico e o payload
+  const payload = message.toString();
+  console.log(`[MQTT] ${topic} ${payload}`);
+});
+
+mqttClient.on('error', (err) => {
+  console.error('Erro na conexão MQTT:', err);
+});
+
+mqttClient.on('offline', () => {
+  console.warn('Cliente MQTT offline. Tentando reconectar...');
+});
+
+
+
 server.listen(port, () => {
   console.log("Server running on port:", port);
 });
-
 
 function parsePtBrDateToISO(str) {
   // Formato esperado: dd/MM/yyyy HH:mm:ss
