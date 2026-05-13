@@ -298,7 +298,7 @@ setInterval(() => {
       handleDisconnect(doorInfo);
     }
   }
-}, heartbeatInterval);
+}, 2000);
 
 
 app.get("/", (req, res) => {
@@ -359,6 +359,7 @@ app.post("/portao_emerg", async (req, res) => {
       const lastRow = await getLatestRow(door);
 
       if (!lastRow) {
+        await recordDoorEvent(door, open);
         // console.error("Portão não encontrado");
         return res.status(404).json({ error: "Portão não encontrado." });
       }

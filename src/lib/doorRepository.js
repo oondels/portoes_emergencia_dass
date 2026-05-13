@@ -31,7 +31,7 @@ export async function getOrInsertDoor(door) {
     [door.doorId, door.name]
   );
 
-  return insertRes.rows[0].portao;
+  return insertRes.rows[0];
 }
 
 // Últimas aberturas por portão
