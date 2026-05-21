@@ -11,7 +11,7 @@ export async function getDistinctDoors() {
 export async function getOrInsertDoor(door) {
   if (!door) {
     const res = await pool.query(
-      `SELECT door_id, name FROM portoes.portoes_emerg_registrados`
+      `SELECT door_id, name, device_id FROM portoes.portoes_emerg_registrados`
     );
 
     return res?.rows || []

@@ -2,7 +2,7 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
-import mqtt from "mqtt"; 
+import mqtt from "mqtt";
 import {
   getLastOpenings,
   getOrInsertDoor,
@@ -18,6 +18,16 @@ const server = http.createServer(app);
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// INTEGRAÇÃO MQTT (Ouvinte / Subscriber)
+const mqttOptions = {
+  host: process.env.MQTT_HOST,
+  port: Number(process.env.MQTT_PORT) || 1883,
+  username: process.env.MQTT_USER,
+  password: process.env.MQTT_PASS
+};
+
+const mqttClient = mqtt.connect(`mqtt://${mqttOptions.host}:${mqttOptions.port}`, mqttOptions);
+
 // const transporter = createTransporter();
 
 const io = new Server(server, {
@@ -29,6 +39,38 @@ const io = new Server(server, {
 app.use((req, res, next) => {
   req.io = io;
   next();
+});
+
+mqttClient.on('connect', () => {
+  console.log('Conectado ao broker MQTT com sucesso!');
+
+  const topicToSubscribe = 'dass/galpao/#';
+
+  mqttClient.subscribe(topicToSubscribe, (err) => {
+    if (!err) {
+      console.log(`Inscrito no tópico MQTT: ${topicToSubscribe}`);
+    } else {
+      console.error('Erro ao se inscrever no tópico MQTT:', err);
+    }
+  });
+});
+
+mqttClient.on('message', (topic, message) => {
+  // O -v (verbose) do mosquitto_sub imprime o tópico e o payload
+  const payload = message.toString();
+  console.log(`[MQTT] ${topic} ${payload}`);
+
+  watchers.forEach((watcher) => {
+    io.to(watcher.socketId).emit("mqtt_data", payload);
+  });
+});
+
+mqttClient.on('error', (err) => {
+  console.error('Erro na conexão MQTT:', err);
+});
+
+mqttClient.on('offline', () => {
+  console.warn('Cliente MQTT offline. Tentando reconectar...');
 });
 
 // Heartbeat genérico por portão 
@@ -193,6 +235,8 @@ io.on("connection", (socket) => {
 
   socket.on("last_openings", async (payload = {}) => {
     try {
+      console.log(payload);
+
       const searchedDoor = doors.get(payload.door);
 
       const limit = Number(payload?.limit) > 0 ? Number(payload.limit) : 5;
@@ -409,48 +453,6 @@ app.post("/portao_emerg", async (req, res) => {
     res.status(500).send("Erro interno no servidor:", error);
   }
 });
-
-
-
-// INTEGRAÇÃO MQTT (Ouvinte / Subscriber)
-const mqttOptions = {
-  host: '10.100.1.43',
-  port: 1883,
-  username: 'dass',
-  password: 'pHUWphISTl7r_Geis'
-};
-
-const mqttClient = mqtt.connect(`mqtt://${mqttOptions.host}:${mqttOptions.port}`, mqttOptions);
-
-mqttClient.on('connect', () => {
-  console.log('Conectado ao broker MQTT com sucesso!');
-  
-  const topicToSubscribe = 'dass/galpao/#';
-  
-  mqttClient.subscribe(topicToSubscribe, (err) => {
-    if (!err) {
-      console.log(`Inscrito no tópico MQTT: ${topicToSubscribe}`);
-    } else {
-      console.error('Erro ao se inscrever no tópico MQTT:', err);
-    }
-  });
-});
-
-mqttClient.on('message', (topic, message) => {
-  // O -v (verbose) do mosquitto_sub imprime o tópico e o payload
-  const payload = message.toString();
-  console.log(`[MQTT] ${topic} ${payload}`);
-});
-
-mqttClient.on('error', (err) => {
-  console.error('Erro na conexão MQTT:', err);
-});
-
-mqttClient.on('offline', () => {
-  console.warn('Cliente MQTT offline. Tentando reconectar...');
-});
-
-
 
 server.listen(port, () => {
   console.log("Server running on port:", port);
