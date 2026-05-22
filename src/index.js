@@ -56,29 +56,77 @@ mqttClient.on('connect', () => {
   });
 });
 
+// Gerenciador de Watchdog no Backend
+const mqttWatchdogs = new Map();
+
 mqttClient.on('message', async (topic, message) => {
-  // O -v (verbose) do mosquitto_sub imprime o tópico e o payload
-  const payload = message.toString();
-  const parsedPayload = JSON.parse(payload)
-  console.log(parsedPayload);
-  
+  try {
+    const payload = message.toString();
+    const parsedPayload = JSON.parse(payload);
+    const portaId = parsedPayload.nome;
+    
+    // Normalização defensiva transferida do frontend
+    const isOnline = parsedPayload.status && String(parsedPayload.status).toUpperCase() === "ONLINE";
+    const estado = parsedPayload.estado;
+    const timestamp = parsedPayload.timestamp || new Date().toLocaleString("pt-BR");
 
-  const status = parsedPayload.estado
-  if (status === 'ON') {
-    const date = new Date()
-    console.log("Porta galpão aberta: ", parsedPayload);
-    // Salvar informação no banco de dados
-    // Busca id do galpao pelo nome enviado pelo device
-    const doorId = await getIdByName(parsedPayload.nome)
-    if (doorId) {
-      await recordDoorEvent(doorId, status, date);
+    if (estado === "ON") {
+      console.log("[ALERTA - Esp 32] Estado:", estado, "| Hora:", timestamp, "| Nome:", portaId);
+      
+      const date = new Date();
+      // Salvar informação no banco de dados
+      const doorId = await getIdByName(portaId);
+      if (doorId) {
+        await recordDoorEvent(doorId, estado, date);
+      }
     }
-  }
 
-  // Emite mensagem para frontend (watcher)
-  watchers.forEach((watcher) => {
-    io.to(watcher.socketId).emit("mqtt_data", payload);
-  });
+    if (isOnline) {
+      console.log("[SISTEMA - Esp32] Dispositivo Online:", parsedPayload.status, "| Nome:", portaId);
+
+      // LÓGICA DO WATCHDOG TIMER NO BACKEND
+      if (mqttWatchdogs.has(portaId)) {
+        clearTimeout(mqttWatchdogs.get(portaId));
+      }
+
+      const novoTimerId = setTimeout(() => {
+        console.warn(`[WATCHDOG] Dispositivo ${portaId} inativo há 30s. Marcando como OFFLINE.`);
+        // Emite alerta para o frontend de que o dispositivo caiu
+        watchers.forEach((watcher) => {
+          io.to(watcher.socketId).emit("mqtt_update", {
+            deviceId: portaId,
+            alive: false
+          });
+        });
+      }, 30000);
+
+      mqttWatchdogs.set(portaId, novoTimerId);
+    }
+
+    // Prepara os dados limpos para enviar ao frontend
+    const updateData = { deviceId: portaId };
+    
+    if (isOnline) {
+      updateData.alive = true;
+    }
+
+    if (estado === "ON") {
+      updateData.status = true;
+      updateData.lastUpdate = timestamp;
+    } else if (estado === "OFF") {
+      updateData.status = false;
+    }
+
+    // Confirma envio do status mastigado
+    if (updateData.alive !== undefined || updateData.status !== undefined) {
+      watchers.forEach((watcher) => {
+        io.to(watcher.socketId).emit("mqtt_update", updateData);
+      });
+    }
+
+  } catch (error) {
+    console.error("Falha crítica ao processar payload do MQTT no backend:", error);
+  }
 });
 
 mqttClient.on('error', (err) => {
