@@ -48,6 +48,20 @@ export async function getLastOpenings({ doorId, limit = 5 }) {
   return result.rows;
 }
 
+export const getIdByName = async (nome) => {
+  try {
+    const result = await pool.query(` 
+      SELECT door_id from portoes.portoes_emerg_registrados
+      WHERE device_id = $1
+    `, [nome])
+    
+    return result?.rows[0].door_id
+  } catch (error) {
+    console.error("Erro ao buscar id pelo nome do device: ", error);
+    
+  }
+}
+
 // Insere evento de portão (status true/false). Se date não informado, usa timezone São Paulo.
 export async function recordDoorEvent(doorId, status, date = null) {
   if (date) {

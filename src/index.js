@@ -8,6 +8,7 @@ import {
   getOrInsertDoor,
   recordDoorEvent,
   getLatestRow,
+  getIdByName
 } from "./lib/doorRepository.js"
 import { createTransporter } from "./lib/mailer.js";
 
@@ -55,11 +56,26 @@ mqttClient.on('connect', () => {
   });
 });
 
-mqttClient.on('message', (topic, message) => {
+mqttClient.on('message', async (topic, message) => {
   // O -v (verbose) do mosquitto_sub imprime o tópico e o payload
   const payload = message.toString();
-  console.log(`[MQTT] ${topic} ${payload}`);
+  const parsedPayload = JSON.parse(payload)
+  console.log(parsedPayload);
+  
 
+  const status = parsedPayload.estado
+  if (status === 'ON') {
+    const date = new Date()
+    console.log("Porta galpão aberta: ", parsedPayload);
+    // Salvar informação no banco de dados
+    // Busca id do galpao pelo nome enviado pelo device
+    const doorId = await getIdByName(parsedPayload.nome)
+    if (doorId) {
+      await recordDoorEvent(doorId, status, date);
+    }
+  }
+
+  // Emite mensagem para frontend (watcher)
   watchers.forEach((watcher) => {
     io.to(watcher.socketId).emit("mqtt_data", payload);
   });
@@ -235,9 +251,19 @@ io.on("connection", (socket) => {
 
   socket.on("last_openings", async (payload = {}) => {
     try {
-      console.log(payload);
-
       const searchedDoor = doors.get(payload.door);
+      // TODO: Gambiarra! Corrigir depois, essa gambiarra é para nao dar erro na consulta de ultmas detecções mqtt dos galopoe -> Centralizar logica
+      if (!searchedDoor) {
+        // Busca galpao pelo `door`
+        const limit = Number(payload?.limit) > 0 ? Number(payload.limit) : 5;
+        const openings = await getLastOpenings({ doorId: payload.door, limit });
+
+        socket.emit("last_openings", {
+          doorId: payload.door,
+          lastOppenings: openings.map(r => r.date)
+        })
+        return
+      }
 
       const limit = Number(payload?.limit) > 0 ? Number(payload.limit) : 5;
       const openings = await getLastOpenings({ doorId: searchedDoor.doorId, limit });
