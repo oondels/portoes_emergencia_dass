@@ -8,7 +8,9 @@ import {
   getOrInsertDoor,
   recordDoorEvent,
   getLatestRow,
-  getIdByName
+  getIdByName,
+  upsertDeviceSignal,
+  setDeviceOffline
 } from "./lib/doorRepository.js"
 import { createTransporter } from "./lib/mailer.js";
 
@@ -59,16 +61,40 @@ mqttClient.on('connect', () => {
 // Gerenciador de Watchdog no Backend
 const mqttWatchdogs = new Map();
 
+const mqttDeviceTimer = 20000
 mqttClient.on('message', async (topic, message) => {
   try {
     const payload = message.toString();
     const parsedPayload = JSON.parse(payload);
     const portaId = parsedPayload.nome;
     
-    // Normalização defensiva transferida do frontend
     const isOnline = parsedPayload.status && String(parsedPayload.status).toUpperCase() === "ONLINE";
     const estado = parsedPayload.estado;
     const timestamp = parsedPayload.timestamp || new Date().toLocaleString("pt-BR");
+
+    // Adiciona ou atualiza o sinal no banco (sempre que enviar mensagem)
+    await upsertDeviceSignal(portaId, 'online');
+
+    // Sempre resetar o watchdog pois recebemos um sinal
+    if (mqttWatchdogs.has(portaId)) {
+      clearTimeout(mqttWatchdogs.get(portaId));
+    }
+
+    const novoTimerId = setTimeout(async () => {
+      console.warn(`[WATCHDOG] Dispositivo ${portaId} inativo há 20s. Marcando como OFFLINE no banco e frontend.`);
+      
+      await setDeviceOffline(portaId);
+
+      // Emite alerta para o frontend de que o dispositivo caiu
+      watchers.forEach((watcher) => {
+        io.to(watcher.socketId).emit("mqtt_update", {
+          deviceId: portaId,
+          alive: false
+        });
+      });
+    }, mqttDeviceTimer);
+
+    mqttWatchdogs.set(portaId, novoTimerId);
 
     if (estado === "ON") {
       console.log("[ALERTA - Esp 32] Estado:", estado, "| Hora:", timestamp, "| Nome:", portaId);
@@ -83,24 +109,6 @@ mqttClient.on('message', async (topic, message) => {
 
     if (isOnline) {
       console.log("[SISTEMA - Esp32] Dispositivo Online:", parsedPayload.status, "| Nome:", portaId);
-
-      // LÓGICA DO WATCHDOG TIMER NO BACKEND
-      if (mqttWatchdogs.has(portaId)) {
-        clearTimeout(mqttWatchdogs.get(portaId));
-      }
-
-      const novoTimerId = setTimeout(() => {
-        console.warn(`[WATCHDOG] Dispositivo ${portaId} inativo há 30s. Marcando como OFFLINE.`);
-        // Emite alerta para o frontend de que o dispositivo caiu
-        watchers.forEach((watcher) => {
-          io.to(watcher.socketId).emit("mqtt_update", {
-            deviceId: portaId,
-            alive: false
-          });
-        });
-      }, 30000);
-
-      mqttWatchdogs.set(portaId, novoTimerId);
     }
 
     // Prepara os dados limpos para enviar ao frontend
